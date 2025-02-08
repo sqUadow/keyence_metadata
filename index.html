@@ -61,6 +61,22 @@
             // Define the Python functions (including necessary imports)
             await pyodide.runPythonAsync(`
 import re
+import struct
+
+def decode_double(value):
+    """Decodes IEEE 754 double-precision value stored as integer"""
+    try:
+        b = struct.pack('Q', int(value))
+        return struct.unpack('d', b)[0]
+    except:
+        return None
+
+def decode_calibration(cal_value):
+    """Decodes the calibration value to micrometers per pixel"""
+    nm_per_px = decode_double(cal_value)
+    if nm_per_px is not None:
+        return nm_per_px / 1000
+    return None
 
 def parse_metadata(content):
     """Parses Keyence microscope metadata from a TIFF file."""
