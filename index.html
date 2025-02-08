@@ -164,16 +164,17 @@ def format_metadata_table(metadata):
 
                 const pythonByteArray = pyodide.toPy(uint8Array);
 
+                // Pass pythonByteArray as a keyword argument
                 const result = await pyodide.runPythonAsync(`
                     import js
                     from pyodide.ffi import to_js
-                    content = to_js(pythonByteArray)
+                    content = to_js(pythonByteArray)  # Now it's defined!
                     content = "".join(chr(x) for x in content)
 
                     metadata = parse_metadata(content)
                     html_table = format_metadata_table(metadata)
                     html_table
-                `);
+                `, { pythonByteArray: pythonByteArray }); // Pass it here!
 
                 document.getElementById('output').innerHTML = result;
             };
