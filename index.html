@@ -162,22 +162,33 @@ def format_metadata_table(metadata):
                 const arrayBuffer = e.target.result;
                 const uint8Array = new Uint8Array(arrayBuffer);
 
-                const pythonByteArray = pyodide.toPy(uint8Array);
-
-                // Pass pythonByteArray as a keyword argument
-                const result = await pyodide.runPythonAsync(`
+                // Create the Python byte array
+                await pyodide.runPythonAsync(`
                     import js
                     from pyodide.ffi import to_js
-                    content = to_js(pythonByteArray)  # Now it's defined!
-                    content = "".join(chr(x) for x in content)
-
+                    
+                    # Get the uint8Array from JavaScript
+                    uint8Array = js.uint8Array
+                    
+                    # Convert to string
+                    content = "".join(chr(x) for x in uint8Array)
+                    
+                    # Process the content
                     metadata = parse_metadata(content)
                     html_table = format_metadata_table(metadata)
-                    html_table
-                `, { pythonByteArray: pythonByteArray }); // Pass it here!
+                `, { uint8Array }); // Pass uint8Array as a local variable
 
+                // Get the result back from Python
+                const result = pyodide.globals.get('html_table');
                 document.getElementById('output').innerHTML = result;
+                
+                // Clean up
+                pyodide.globals.delete('uint8Array');
+                pyodide.globals.delete('content');
+                pyodide.globals.delete('metadata');
+                pyodide.globals.delete('html_table');
             };
+            
             reader.onerror = function(e) {
                 console.error("FileReader error:", e);
                 document.getElementById('output').innerHTML = "<p>Error reading file.</p>";
