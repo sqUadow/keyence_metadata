@@ -85,12 +85,10 @@ def parse_metadata(content):
     shooting_match = re.search(r'<Shooting [^>]*>(.*?)</Shooting>', data_str, re.DOTALL)
     if shooting_match:
         shooting_data = shooting_match.group(1)
-        k, v = extract_and_mark(shooting_data, 'StageLocationX', is_double=True)
-        metadata[k] = v
-        k, v = extract_and_mark(shooting_data, 'StageLocationY', is_double=True)
-        metadata[k] = v
-        k, v = extract_and_mark(shooting_data, 'StageLocationZ', is_double=True)
-        metadata[k] = v
+        metadata['StageLocationX'] = _extract_value(shooting_data, 'StageLocationX')  # No asterisk
+        metadata['StageLocationY'] = _extract_value(shooting_data, 'StageLocationY')  # No asterisk
+        metadata['StageLocationZ'] = _extract_value(shooting_data, 'StageLocationZ') # No asterisk
+
         metadata['Channel'] = _extract_value(shooting_data, 'Channel')
         metadata['Observation'] = _extract_value(shooting_data, 'Observation')
         metadata['PseudoColor'] = _extract_value(shooting_data, 'PseudoColor', search_in='Parameter')
