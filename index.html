@@ -159,10 +159,15 @@ def format_metadata_table(metadata):
 
             const reader = new FileReader();
             reader.onload = async function(e) {
-                const content = e.target.result;
+                const arrayBuffer = e.target.result;
+                const uint8Array = new Uint8Array(arrayBuffer);
+                let content = "";
+                for (let i = 0; i < uint8Array.length; i++) {
+                    content += String.fromCharCode(uint8Array[i]);
+                }
+
                 // Escape special characters for Python string
                 const escapedContent = content.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-
 
                 // Run the Python code, passing the escaped content
                 const result = await pyodide.runPythonAsync(`
@@ -173,10 +178,11 @@ def format_metadata_table(metadata):
 
                 document.getElementById('output').innerHTML = result;
             };
-            reader.onerror = function() {
+            reader.onerror = function(e) {
+                console.error("FileReader error:", e);
                 document.getElementById('output').innerHTML = "<p>Error reading file.</p>";
             }
-            reader.readAsText(file, 'utf-8'); // Use UTF-8 encoding
+            reader.readAsArrayBuffer(file); // Read as binary data!
         }
         // --- Drag and Drop Event Handlers ---
           function handleDragOver(event) {
