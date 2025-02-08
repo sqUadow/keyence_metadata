@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TIFF Metadata Viewer</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+    <style>
+        .metadata-table {
+            border-collapse: collapse;
+            width: 100%;
+            max-width: 800px;
+            margin: 20px auto;
+        }
+        .metadata-table td, .metadata-table th {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .metadata-table tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>TIFF Metadata Viewer</h1>
+        <input type="file" id="fileInput" accept=".tiff,.tif">
+        <div id="output"></div>
+    </div>
+
+    <script>
+        async function loadPyodide() {
+            let pyodide = await loadPyodide();
+            
+            // Define the Python functions
+            await pyodide.runPythonAsync(`
+                import re
+
+                def parse_metadata(content):
+                    # Find the <Data> ... </Data> block
+                    match = re.search(r'<Data>(.*?)</Data>', content, re.DOTALL)
+                    if not match:
+                        return {}
+
+                    data_str = match.group(1)
+                    metadata = {}
+
+                    # --- Image Section ---
+                    image_match = re.search(r'<Image [^>]*>(.*?)</Image>', data_str, re.DOTALL)
+                    if image_match:
+                        image_data = image_match.group(1)
+                        metadata['Comment'] = _extract_value(image_data, 'Comment')
+                        metadata['OriginalImageSize_Width'] = _extract_value(image_data, 'OriginalImageSize', 'Width')
+                        metadata['OriginalImageSize_Height'] = _extract_value(image_data, 'OriginalImageSize', 'Height')
+                        metadata['DigitalZoom'] = _extract_value(image_data, 'DigitalZoom')
+                        metadata['Calibration'] = _extract_value(image_data, 'Calibration')
+
+                    # --- Lens Section ---
+                    lens_match = re.search(r'<Lens [^>]*>(.*?)</Lens>', data_str, re.DOTALL)
+                    if lens_match:
+                        lens_data = lens_match.group(1)
+                        metadata['LensName'] = _extract_value(lens_data, 'LensName')
+                        metadata['Magnification'] = _extract_value(lens_data, 'Magnification')
+                        metadata['NumericalAperture'] = _extract_value(lens_data, 'NumericalAperture')
+                        metadata['WorkingDistance'] = _extract_value(lens_data, 'WorkingDistance')
+
+                    # --- Shooting Section ---
+                    shooting_match = re.search(r'<Shooting [^>]*>(.*?)</Shooting>', data_str, re.DOTALL)
+                    if shooting_match:
+                        shooting_data = shooting_match.group(1)
+                        metadata['StageLocationX'] = _extract_value(shooting_data, 'StageLocationX')
+                        metadata['StageLocationY'] = _extract_value(shooting_data, 'StageLocationY')
+                        metadata['StageLocationZ'] = _extract_value(shooting_data, 'StageLocationZ')
+                        metadata['Channel'] = _extract_value(shooting_data, 'Channel')
+                        metadata['Observation'] = _extract_value(shooting_data, 'Observation')
+
+                    return metadata
+
+                def _extract_value(data_str, tag, subtag=None, search_in=None):
+                    if search_in:
+                        outer_match = re.search(rf'<{search_in} [^>]*>(.*?)</{search_in}>', data_str, re.DOTALL)
+                        if not outer_match:
+                            return None
+                        data_str = outer_match.group(1)
+
+                    if subtag:
+                        pattern = rf'<{tag} [^>]*>.*?<{subtag} [^>]*>(.*?)</{subtag}>.*?</{tag}>'
+                    else:
+                        pattern = rf'<{tag} [^>]*>(.*?)</{tag}>'
+
+                    match = re.search(pattern, data_str, re.DOTALL)
+                    return match.group(1) if match else None
+
+                def format_metadata_table(metadata):
+                    if not metadata:
+                        return "<p>No metadata found in file.</p>"
+                    
+                    html = "<table class='metadata-table'>"
+                    html += "<tr><th>Parameter</th><th>Value</th></tr>"
+                    for key, value in metadata.items():
+                        if value is not None:
+                            html += f"<tr><td>{key}</td><td>{value}</td></tr>"
+                    html += "</table>"
+                    return html
+            `);
+            
+            return pyodide;
+        }
+
+        let pyodideReadyPromise = loadPyodide();
+
+        async function processTiff(file) {
+            let pyodide = await pyodideReadyPromise;
+            
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const content = e.target.result;
+                
+                // Run the Python code on the file content
+                const result = await pyodide.runPythonAsync(`
+                    content = """${content}"""
+                    metadata = parse_metadata(content)
+                    format_metadata_table(metadata)
+                `);
+                
+                document.getElementById('output').innerHTML = result;
+            };
+            
+            // Read the file as text
+            reader.readAsText(file, 'utf-8');
+        }
+
+        document.getElementById('fileInput').addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                processTiff(file);
+            }
+        });
+    </script>
+</body>
+</html>
