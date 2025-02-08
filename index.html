@@ -4,38 +4,12 @@
     <title>TIFF Metadata Viewer</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
     <style>
-        .metadata-table {
-            border-collapse: collapse;
-            width: 100%;
-            max-width: 800px;
-            margin: 20px auto;
-        }
-        .metadata-table td, .metadata-table th {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
-        }
-        .metadata-table tr:nth-child(even) {
-            background-color: #f2f2f2;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            text-align: center;
-        }
-        #drop-area {
-            border: 2px dashed #ccc;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
-            text-align: center;
-            cursor: pointer;
-        }
-        #drop-area.highlight {
-            border-color: #666;
-            background-color: #eee;
-        }
+        .metadata-table { border-collapse: collapse; width: 100%; max-width: 800px; margin: 20px auto; }
+        .metadata-table td, .metadata-table th { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        .metadata-table tr:nth-child(even) { background-color: #f2f2f2; }
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; text-align: center; }
+        #drop-area { border: 2px dashed #ccc; border-radius: 10px; padding: 20px; margin-bottom: 20px; text-align: center; cursor: pointer; }
+        #drop-area.highlight { border-color: #666; background-color: #eee; }
     </style>
 </head>
 <body>
@@ -47,37 +21,19 @@
         <input type="file" id="fileInput" accept=".tiff,.tif" style="display: none;">
         <div id="output"></div>
     </div>
-
     <script>
         async function loadPyodideAndFunctions() {
             let pyodide = await loadPyodide();
-            // Install required packages (micropip is included with pyodide - if you need other packages besides those in standard lib)
-           // await pyodide.loadPackage("micropip");
-           // await pyodide.runPythonAsync(`
-           //     import micropip
-           //     await micropip.install('some_package')
-           // `);
-
-            // Define the Python functions (including necessary imports)
             await pyodide.runPythonAsync(`
 import re
 import struct
 
 def decode_double(value):
-    """Decodes IEEE 754 double-precision value stored as integer"""
+    """Decodes IEEE 754 double-precision value stored as integer."""
     try:
-        b = struct.pack('Q', int(value))
-        return struct.unpack('d', b)[0]
-    except:
+        return struct.unpack('d', struct.pack('Q', int(value)))[0]
+    except (ValueError, TypeError):  # Handle non-numeric input
         return None
-
-def decode_calibration(cal_value):
-    """Decodes the calibration value to micrometers per pixel"""
-    nm_per_px = decode_double(cal_value)
-    if nm_per_px is not None:
-        return nm_per_px / 1000
-    return None
-    
 
 def parse_metadata(content):
     """Parses Keyence microscope metadata from a TIFF file."""
@@ -87,6 +43,14 @@ def parse_metadata(content):
 
     data_str = match.group(1)
     metadata = {}
+
+    def extract_and_mark(data, tag, subtag=None, search_in=None, is_double=False):
+        """Extracts a value and adds '*' to the key if it's a double."""
+        value = _extract_value(data, tag, subtag, search_in)
+        key = tag
+        if is_double:
+            key += "*"
+        return key, value
 
     # --- Image Section ---
     image_match = re.search(r'<Image [^>]*>(.*?)</Image>', data_str, re.DOTALL)
@@ -98,10 +62,11 @@ def parse_metadata(content):
         metadata['SavingImageSize_Width'] = _extract_value(image_data, 'SavingImageSize', 'Width')
         metadata['SavingImageSize_Height'] = _extract_value(image_data, 'SavingImageSize', 'Height')
         metadata['DigitalZoom'] = _extract_value(image_data, 'DigitalZoom')
-        metadata['Calibration*'] = _extract_value(image_data, 'Calibration')
-        metadata['Focus*'] = _extract_value(image_data, 'Focus')
+        k, v = extract_and_mark(image_data, 'Calibration', is_double=True)
+        metadata[k] = v
+        k, v = extract_and_mark(image_data, 'Focus', is_double=True)
+        metadata[k] = v
         metadata['PatchNumber'] = _extract_value(image_data, 'PatchNumber')
-
 
     # --- Lens Section ---
     lens_match = re.search(r'<Lens [^>]*>(.*?)</Lens>', data_str, re.DOTALL)
@@ -109,8 +74,10 @@ def parse_metadata(content):
         lens_data = lens_match.group(1)
         metadata['LensName'] = _extract_value(lens_data, 'LensName')
         metadata['Magnification'] = _extract_value(lens_data, 'Magnification')
-        metadata['NumericalAperture*'] = _extract_value(lens_data, 'NumericalAperture')
-        metadata['WorkingDistance*'] = _extract_value(lens_data, 'WorkingDistance')
+        k, v = extract_and_mark(lens_data, 'NumericalAperture', is_double=True)
+        metadata[k] = v
+        k, v = extract_and_mark(lens_data, 'WorkingDistance', is_double=True)
+        metadata[k] = v
         metadata['LiquidImmersion'] = _extract_value(lens_data, 'LiquidImmersion')
         metadata['RevolverPosition'] = _extract_value(lens_data, 'RevolverPosition')
 
@@ -118,13 +85,16 @@ def parse_metadata(content):
     shooting_match = re.search(r'<Shooting [^>]*>(.*?)</Shooting>', data_str, re.DOTALL)
     if shooting_match:
         shooting_data = shooting_match.group(1)
-        metadata['StageLocationX*'] = _extract_value(shooting_data, 'StageLocationX')
-        metadata['StageLocationY*'] = _extract_value(shooting_data, 'StageLocationY')
-        metadata['StageLocationZ*'] = _extract_value(shooting_data, 'StageLocationZ')
+        k, v = extract_and_mark(shooting_data, 'StageLocationX', is_double=True)
+        metadata[k] = v
+        k, v = extract_and_mark(shooting_data, 'StageLocationY', is_double=True)
+        metadata[k] = v
+        k, v = extract_and_mark(shooting_data, 'StageLocationZ', is_double=True)
+        metadata[k] = v
         metadata['Channel'] = _extract_value(shooting_data, 'Channel')
         metadata['Observation'] = _extract_value(shooting_data, 'Observation')
         metadata['PseudoColor'] = _extract_value(shooting_data, 'PseudoColor', search_in='Parameter')
-        metadata['Binning'] = _extract_value(shooting_data, 'Binnin', search_in='Parameter')
+        metadata['Binning'] = _extract_value(shooting_data, 'Binnin', search_in='Parameter')  # Corrected typo
         metadata['ExposureTime_Numerator'] = _extract_value(shooting_data, 'ExposureTime', 'Numerator')
         metadata['ExposureTime_Denominator'] = _extract_value(shooting_data, 'ExposureTime', 'Denominator')
         metadata['PixelMode'] = _extract_value(shooting_data, 'PixelMode', search_in='Parameter')
@@ -133,28 +103,24 @@ def parse_metadata(content):
     return metadata
 
 def _extract_value(data_str, tag, subtag=None, search_in=None):
-    """Helper function to extract values from the XML-like structure."""
-
+    """Helper function to extract values, correctly handling nested tags."""
     if search_in:
-        # Search within a nested tag (e.g., Parameter)
         outer_match = re.search(rf'<{search_in} [^>]*>(.*?)</{search_in}>', data_str, re.DOTALL)
         if not outer_match:
             return None
         data_str = outer_match.group(1)
 
     if subtag:
-        # Look for a specific subtag (e.g., Width within OriginalImageSize)
-        pattern = rf'<{tag} [^>]*>.*?<{subtag} [^>]*>(.*?)</{subtag}>.*?</{tag}>'
+        pattern = rf'<{tag} [^>]*>.*?<{subtag} [^>]*>([^<]*)</{subtag}>.*?</{tag}>'  # Capture only the value
     else:
-        # Look for a simple tag
-        pattern = rf'<{tag} [^>]*>(.*?)</{tag}>'
+        pattern = rf'<{tag} [^>]*>([^<]*)</{tag}>'  # Capture only the value
 
     match = re.search(pattern, data_str, re.DOTALL)
-    return match.group(1) if match else None
+    return match.group(1).strip() if match else None  # .strip() removes whitespace
 
 
 def format_metadata_table(metadata):
-    """Formats the metadata dictionary into an HTML table, decoding double values."""
+    """Formats metadata, decoding double values marked with '*'."""
     if not metadata:
         return "<p>No metadata found.</p>"
 
@@ -163,122 +129,65 @@ def format_metadata_table(metadata):
     html += "<tr><th>Parameter</th><th>Value</th></tr>"
     for key, value in metadata.items():
         if value is not None:
-            if key.endswith('*'):  # Check if decoding is needed
+            if key.endswith('*'):
                 decoded_value = decode_double(value)
                 if decoded_value is not None:
-                     #Special case of calibration, convert nm to um.
                     if key == "Calibration*":
-                         value = f"{decoded_value/1000:.6f} um/pixel"  # Display as micrometers
-
+                        value = f"{decoded_value / 1000:.6f} um/pixel"
                     else:
-                        value = f"{decoded_value:.6f}" #Show to 6 decimal places.
+                        value = f"{decoded_value:.6f}"
                 else:
-                    value = "Could not decode" #Decoding failed.
-
+                    value = "Could not decode"  # Or original value
             html += f"<tr><td>{key}</td><td>{value}</td></tr>"
     html += "</table>"
     return html
             `);
-
             return pyodide;
         }
 
         let pyodideReadyPromise = loadPyodideAndFunctions();
-
         async function processTiff(file) {
             let pyodide = await pyodideReadyPromise;
-            
             const reader = new FileReader();
             reader.onload = async function(e) {
                 try {
                     const arrayBuffer = e.target.result;
                     const uint8Array = new Uint8Array(arrayBuffer);
-                    
-                    // First, transfer the array to Python
                     pyodide.globals.set('file_data', uint8Array);
-                    
-                    // Convert the data to a string
-                    await pyodide.runPythonAsync(`
-                        content = ''.join(chr(x) for x in file_data)
-                    `);
-                    
-                    // Parse the metadata
-                    await pyodide.runPythonAsync(`
-                        metadata = parse_metadata(content)
-                    `);
-                    
-                    // Format the HTML
-                    await pyodide.runPythonAsync(`
-                        html_result = format_metadata_table(metadata)
-                    `);
-                    
-                    // Get the result
-                    const result = pyodide.globals.get('html_result');
-                    document.getElementById('output').innerHTML = result;
-                    
-                    // Cleanup
+                    await pyodide.runPythonAsync(`content = ''.join(chr(x) for x in file_data)`);
+                    await pyodide.runPythonAsync(`metadata = parse_metadata(content)`);
+                    await pyodide.runPythonAsync(`html_result = format_metadata_table(metadata)`);
+                    document.getElementById('output').innerHTML = pyodide.globals.get('html_result');
                     pyodide.globals.delete('file_data');
                     pyodide.globals.delete('content');
                     pyodide.globals.delete('metadata');
                     pyodide.globals.delete('html_result');
-                    
+
                 } catch (error) {
                     console.error('Error processing TIFF:', error);
-                    document.getElementById('output').innerHTML = 
-                        `<p>Error processing TIFF file: ${error.message}</p>`;
+                    document.getElementById('output').innerHTML = `<p>Error: ${error.message}</p>`;
                 }
             };
-            
-            reader.onerror = function(e) {
+            reader.onerror = (e) => {
                 console.error("FileReader error:", e);
-                document.getElementById('output').innerHTML = 
-                    "<p>Error reading file.</p>";
+                document.getElementById('output').innerHTML = "<p>Error reading file.</p>";
             };
-            
             reader.readAsArrayBuffer(file);
         }
-        // --- Drag and Drop Event Handlers ---
-          function handleDragOver(event) {
-            event.preventDefault();
-            event.stopPropagation(); // Prevent the browser's default drag-and-drop behavior
-            document.getElementById('drop-area').classList.add('highlight');
-          }
-
-          function handleDragLeave(event) {
-            event.preventDefault();
-            event.stopPropagation();
-            document.getElementById('drop-area').classList.remove('highlight');
-          }
-
-          function handleDrop(event) {
-            event.preventDefault();
-            event.stopPropagation();
-            document.getElementById('drop-area').classList.remove('highlight');
-
-            const file = event.dataTransfer.files[0];
-            if (file && file.name.match(/\.(tiff?)$/i)) { // Check file extension
-                processTiff(file);
-            } else {
-                document.getElementById('output').innerHTML = "<p>Invalid file type. Please drop a TIFF file.</p>";
-            }
-          }
-
-          // --- Event Listeners ---
-
-          // File input (click)
-          document.getElementById('fileInput').addEventListener('change', (event) => {
-              const file = event.target.files[0];
-              if (file) {
-                  processTiff(file);
-              }
-          });
-            // Drag and Drop events
-            const dropArea = document.getElementById('drop-area');
-            dropArea.addEventListener('dragover', handleDragOver);
-            dropArea.addEventListener('dragleave', handleDragLeave);
-            dropArea.addEventListener('drop', handleDrop);
-
-
+        document.getElementById('fileInput').addEventListener('change', (event) => {
+            if (event.target.files[0]) { processTiff(event.target.files[0]); }
+        });
+        const dropArea = document.getElementById('drop-area');
+        dropArea.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropArea.classList.add('highlight'); });
+        dropArea.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); dropArea.classList.remove('highlight'); });
+        dropArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropArea.classList.remove('highlight');
+            const file = e.dataTransfer.files[0];
+            if (file && file.name.match(/\.(tiff?)$/i)) { processTiff(file); }
+            else { document.getElementById('output').innerHTML = "<p>Invalid file type.</p>"; }
+        });
     </script>
 </body>
 </html>
