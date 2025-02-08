@@ -60,9 +60,13 @@
                 await pyodide.runPythonAsync(`
                     import re
                     import js
+                    from js import Uint8Array
 
-                    def parse_metadata(content):
+                    def parse_metadata(data):
                         try:
+                            # Convert bytes to string, ignoring non-text bytes
+                            content = data.decode('utf-8', errors='ignore')
+                            
                             # Find the <Data> ... </Data> block
                             match = re.search(r'<Data>(.*?)</Data>', content, re.DOTALL)
                             if not match:
@@ -145,14 +149,14 @@
                 const reader = new FileReader();
                 reader.onload = async function(e) {
                     try {
-                        const content = e.target.result;
-                        console.log('File content length:', content.length);
+                        const arrayBuffer = e.target.result;
+                        const uint8Array = new Uint8Array(arrayBuffer);
                         
                         // Run the Python code on the file content
                         const result = await pyodide.runPythonAsync(`
                             try:
-                                content = """${content}"""
-                                metadata = parse_metadata(content)
+                                data = Uint8Array.new(js.Uint8Array.from(${uint8Array}))
+                                metadata = parse_metadata(data)
                                 format_metadata_table(metadata)
                             except Exception as e:
                                 import sys
@@ -173,8 +177,8 @@
                     showStatus('Error reading file', true);
                 };
                 
-                // Read the file as text
-                reader.readAsText(file, 'utf-8');
+                // Read the file as ArrayBuffer instead of text
+                reader.readAsArrayBuffer(file);
             } catch (error) {
                 showStatus('Error processing file: ' + error.message, true);
                 console.error('Processing error:', error);
