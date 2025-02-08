@@ -169,14 +169,14 @@ def format_metadata_table(metadata):
 
                 // Run the Python code, passing the Python byte array
                 const result = await pyodide.runPythonAsync(`
-                    import js
-                    content = js.pyodide.ffi.to_js(pythonByteArray) #gets content from javascript
-                    content = "".join(chr(x) for x in content) #converts bytes to a python string
+                import js
+                content = js.to_js(pythonByteArray) #gets content from javascript
+                content = "".join(chr(x) for x in content) #converts bytes to a python string
 
-                    metadata = parse_metadata(content)
-                    html_table = format_metadata_table(metadata)
-                    html_table
-                `);
+                metadata = parse_metadata(content)
+                html_table = format_metadata_table(metadata)
+                html_table
+            `);
 
                 document.getElementById('output').innerHTML = result;
             };
