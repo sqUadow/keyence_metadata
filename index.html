@@ -156,43 +156,54 @@ def format_metadata_table(metadata):
 
         async function processTiff(file) {
             let pyodide = await pyodideReadyPromise;
-
+            
             const reader = new FileReader();
             reader.onload = async function(e) {
-                const arrayBuffer = e.target.result;
-                const uint8Array = new Uint8Array(arrayBuffer);
-
-                // Create the Python byte array
-                await pyodide.runPythonAsync(`
-                    import js
-                    from pyodide.ffi import to_js
+                try {
+                    const arrayBuffer = e.target.result;
+                    const uint8Array = new Uint8Array(arrayBuffer);
                     
-                    # Get the uint8Array from JavaScript
-                    uint8Array = js.uint8Array
+                    // First, transfer the array to Python
+                    pyodide.globals.set('file_data', uint8Array);
                     
-                    # Convert to string
-                    content = "".join(chr(x) for x in uint8Array)
+                    // Convert the data to a string
+                    await pyodide.runPythonAsync(`
+                        content = ''.join(chr(x) for x in file_data)
+                    `);
                     
-                    # Process the content
-                    metadata = parse_metadata(content)
-                    html_table = format_metadata_table(metadata)
-                `, { uint8Array }); // Pass uint8Array as a local variable
-
-                // Get the result back from Python
-                const result = pyodide.globals.get('html_table');
-                document.getElementById('output').innerHTML = result;
-                
-                // Clean up
-                pyodide.globals.delete('uint8Array');
-                pyodide.globals.delete('content');
-                pyodide.globals.delete('metadata');
-                pyodide.globals.delete('html_table');
+                    // Parse the metadata
+                    await pyodide.runPythonAsync(`
+                        metadata = parse_metadata(content)
+                    `);
+                    
+                    // Format the HTML
+                    await pyodide.runPythonAsync(`
+                        html_result = format_metadata_table(metadata)
+                    `);
+                    
+                    // Get the result
+                    const result = pyodide.globals.get('html_result');
+                    document.getElementById('output').innerHTML = result;
+                    
+                    // Cleanup
+                    pyodide.globals.delete('file_data');
+                    pyodide.globals.delete('content');
+                    pyodide.globals.delete('metadata');
+                    pyodide.globals.delete('html_result');
+                    
+                } catch (error) {
+                    console.error('Error processing TIFF:', error);
+                    document.getElementById('output').innerHTML = 
+                        `<p>Error processing TIFF file: ${error.message}</p>`;
+                }
             };
             
             reader.onerror = function(e) {
                 console.error("FileReader error:", e);
-                document.getElementById('output').innerHTML = "<p>Error reading file.</p>";
-            }
+                document.getElementById('output').innerHTML = 
+                    "<p>Error reading file.</p>";
+            };
+            
             reader.readAsArrayBuffer(file);
         }
         // --- Drag and Drop Event Handlers ---
