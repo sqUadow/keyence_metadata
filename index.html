@@ -11,14 +11,6 @@
         #drop-area { border: 2px dashed #ccc; border-radius: 10px; padding: 20px; margin-bottom: 20px; text-align: center; cursor: pointer; }
         #drop-area.highlight { border-color: #666; background-color: #eee; }
     </style>
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-QFZ5QF6MDR"></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-    
-      gtag('config', 'G-QFZ5QF6MDR');
-    </script>
 </head>
 <body>
     <div class="container">
@@ -35,12 +27,30 @@
             await pyodide.runPythonAsync(`
 import re
 import struct
+import datetime
 
 def decode_double(value):
     """Decodes IEEE 754 double-precision value stored as integer."""
     try:
         return struct.unpack('d', struct.pack('Q', int(value)))[0]
-    except (ValueError, TypeError):  # Handle non-numeric input
+    except (ValueError, TypeError):
+        return None
+
+def decode_timestamp(ts):
+    """Decodes a timestamp using the calculated scaling factor and Unix epoch offset."""
+    try:
+        # Constants
+        UNIX_EPOCH_OFFSET_NS = 860201606885079300000  # Calculated offset from Unix epoch
+        SCALING_FACTOR = -0.01  # Relationship between timestamp units and nanoseconds
+        
+        # Make timestamp positive
+        ts = -int(ts)
+        ns_since_epoch = (ts / SCALING_FACTOR) + UNIX_EPOCH_OFFSET_NS
+        
+        # Convert to datetime
+        return datetime.datetime.fromtimestamp(ns_since_epoch / 1e9).strftime('%Y-%m-%d %H:%M:%S')
+    except (ValueError, TypeError, OSError) as e:
+        print(f"Error decoding timestamp: {e}")
         return None
 
 def parse_metadata(content):
@@ -53,7 +63,6 @@ def parse_metadata(content):
     metadata = {}
 
     def extract_and_mark(data, tag, subtag=None, search_in=None, is_double=False):
-        """Extracts a value and adds '*' to the key if it's a double."""
         value = _extract_value(data, tag, subtag, search_in)
         key = tag
         if is_double:
@@ -64,6 +73,19 @@ def parse_metadata(content):
     image_match = re.search(r'<Image [^>]*>(.*?)</Image>', data_str, re.DOTALL)
     if image_match:
         image_data = image_match.group(1)
+        
+        # Debug print for timestamp extraction
+        print("Searching for ShootingDateTime...")
+        shooting_datetime = _extract_value(image_data, 'ShootingDateTime')
+        print(f"Found ShootingDateTime: {shooting_datetime}")
+        
+        if shooting_datetime:
+            metadata['ShootingDateTime_Raw'] = shooting_datetime
+            decoded_time = decode_timestamp(shooting_datetime)
+            print(f"Decoded time: {decoded_time}")  # Debug print
+            if decoded_time:
+                metadata['ShootingDateTime_Decoded'] = decoded_time
+        
         metadata['Comment'] = _extract_value(image_data, 'Comment')
         metadata['OriginalImageSize_Width'] = _extract_value(image_data, 'OriginalImageSize', 'Width')
         metadata['OriginalImageSize_Height'] = _extract_value(image_data, 'OriginalImageSize', 'Height')
@@ -75,6 +97,14 @@ def parse_metadata(content):
         k, v = extract_and_mark(image_data, 'Focus', is_double=True)
         metadata[k] = v
         metadata['PatchNumber'] = _extract_value(image_data, 'PatchNumber')
+        
+        # Add timestamp extraction
+        timestamp = _extract_value(image_data, 'ShootingDateTime')
+        if timestamp:
+            metadata['ShootingDateTime_Raw'] = timestamp
+            decoded_time = decode_timestamp(int(timestamp))
+            if decoded_time:
+                metadata['ShootingDateTime_Decoded'] = decoded_time
 
     # --- Lens Section ---
     lens_match = re.search(r'<Lens [^>]*>(.*?)</Lens>', data_str, re.DOTALL)
@@ -93,19 +123,19 @@ def parse_metadata(content):
     shooting_match = re.search(r'<Shooting [^>]*>(.*?)</Shooting>', data_str, re.DOTALL)
     if shooting_match:
         shooting_data = shooting_match.group(1)
-        metadata['StageLocationX'] = _extract_value(shooting_data, 'StageLocationX')  # No asterisk
-        metadata['StageLocationY'] = _extract_value(shooting_data, 'StageLocationY')  # No asterisk
-        metadata['StageLocationZ'] = _extract_value(shooting_data, 'StageLocationZ') # No asterisk
-
+        metadata['StageLocationX'] = _extract_value(shooting_data, 'StageLocationX')
+        metadata['StageLocationY'] = _extract_value(shooting_data, 'StageLocationY')
+        metadata['StageLocationZ'] = _extract_value(shooting_data, 'StageLocationZ')
         metadata['Channel'] = _extract_value(shooting_data, 'Channel')
         metadata['Observation'] = _extract_value(shooting_data, 'Observation')
         metadata['PseudoColor'] = _extract_value(shooting_data, 'PseudoColor', search_in='Parameter')
-        metadata['Binning'] = _extract_value(shooting_data, 'Binnin', search_in='Parameter')  # Corrected typo
+        metadata['Binning'] = _extract_value(shooting_data, 'Binning', search_in='Parameter')
         metadata['ExposureTime_Numerator'] = _extract_value(shooting_data, 'ExposureTime', 'Numerator')
         metadata['ExposureTime_Denominator'] = _extract_value(shooting_data, 'ExposureTime', 'Denominator')
         metadata['PixelMode'] = _extract_value(shooting_data, 'PixelMode', search_in='Parameter')
         metadata['CameraGain'] = _extract_value(shooting_data, 'CameraGain', search_in='Parameter')
         metadata['CameraHardwareGain'] = _extract_value(shooting_data, 'CameraHardwareGain', search_in='Parameter')
+
     return metadata
 
 def _extract_value(data_str, tag, subtag=None, search_in=None):
@@ -117,13 +147,12 @@ def _extract_value(data_str, tag, subtag=None, search_in=None):
         data_str = outer_match.group(1)
 
     if subtag:
-        pattern = rf'<{tag} [^>]*>.*?<{subtag} [^>]*>([^<]*)</{subtag}>.*?</{tag}>'  # Capture only the value
+        pattern = rf'<{tag} [^>]*>.*?<{subtag} [^>]*>([^<]*)</{subtag}>.*?</{tag}>'
     else:
-        pattern = rf'<{tag} [^>]*>([^<]*)</{tag}>'  # Capture only the value
+        pattern = rf'<{tag} [^>]*>([^<]*)</{tag}>'
 
     match = re.search(pattern, data_str, re.DOTALL)
-    return match.group(1).strip() if match else None  # .strip() removes whitespace
-
+    return match.group(1).strip() if match else None
 
 def format_metadata_table(metadata):
     """Formats metadata, decoding double values marked with '*'."""
@@ -133,7 +162,17 @@ def format_metadata_table(metadata):
     html = "<p>* Indicates an IEEE 754 double-precision value that has been converted.</p>"
     html += "<table class='metadata-table'>"
     html += "<tr><th>Parameter</th><th>Value</th></tr>"
-    for key, value in metadata.items():
+    
+    # First show ShootingDateTime if it exists
+    if 'ShootingDateTime_Decoded' in metadata:
+        html += f"<tr><td>Shooting Date/Time</td><td>{metadata['ShootingDateTime_Decoded']}</td></tr>"
+    
+    # Then show the rest of the metadata
+    for key, value in sorted(metadata.items()):
+        # Skip the raw and decoded datetime as we're showing it separately
+        if key in ['ShootingDateTime_Raw', 'ShootingDateTime_Decoded']:
+            continue
+            
         if value is not None:
             if key.endswith('*'):
                 decoded_value = decode_double(value)
@@ -143,7 +182,7 @@ def format_metadata_table(metadata):
                     else:
                         value = f"{decoded_value:.6f}"
                 else:
-                    value = "Could not decode"  # Or original value
+                    value = "Could not decode"
             html += f"<tr><td>{key}</td><td>{value}</td></tr>"
     html += "</table>"
     return html
@@ -152,6 +191,7 @@ def format_metadata_table(metadata):
         }
 
         let pyodideReadyPromise = loadPyodideAndFunctions();
+        
         async function processTiff(file) {
             let pyodide = await pyodideReadyPromise;
             const reader = new FileReader();
@@ -168,7 +208,6 @@ def format_metadata_table(metadata):
                     pyodide.globals.delete('content');
                     pyodide.globals.delete('metadata');
                     pyodide.globals.delete('html_result');
-
                 } catch (error) {
                     console.error('Error processing TIFF:', error);
                     document.getElementById('output').innerHTML = `<p>Error: ${error.message}</p>`;
@@ -180,9 +219,11 @@ def format_metadata_table(metadata):
             };
             reader.readAsArrayBuffer(file);
         }
+
         document.getElementById('fileInput').addEventListener('change', (event) => {
             if (event.target.files[0]) { processTiff(event.target.files[0]); }
         });
+
         const dropArea = document.getElementById('drop-area');
         dropArea.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropArea.classList.add('highlight'); });
         dropArea.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); dropArea.classList.remove('highlight'); });
